@@ -1,0 +1,4 @@
+bin
+deps
+pkg
+vendor/src
