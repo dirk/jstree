@@ -65,7 +65,7 @@ func (i *Identifier) Print(indent int) {
 
 func (b *BlockStatement) Print(indent int) {
 	println(indentFor(indent), "BlockStatement")
-	for _, node := range b.body {
+	for _, node := range b.Body {
 		printNode(node, indent + 1)
 	}
 }

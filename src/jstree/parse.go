@@ -2,6 +2,7 @@ package jstree
 
 import "fmt"
 import "log"
+import "reflect"
 
 import "github.com/bitly/go-simplejson"
 
@@ -62,11 +63,6 @@ type ImportDeclaration struct {
 	source *Literal
 }
 
-type BlockStatement struct {
-	Position
-	body []interface{}
-}
-
 type ReturnStatement struct {
 	Position
 	argument interface{}
@@ -84,6 +80,16 @@ type BinaryExpression struct {
 	right interface{}
 }
 
+type BlockStatement struct {
+	Position
+	Body []interface{}
+}
+
+type ExpressionStatement struct {
+	Position
+	Expression interface{}
+}
+
 type VariableDeclaration struct {
 	Position
 	kind string
@@ -94,6 +100,21 @@ type VariableDeclarator struct {
 	Position
 	id interface{}
 	init interface{}
+}
+
+type UpdateExpression struct {
+	Position
+	Operator string
+	Prefix   bool
+	Argument interface{}
+}
+
+type ForStatement struct {
+	Position
+	Init interface{}
+	Test interface{}
+	Update interface{}
+	Body interface{}
 }
 
 
@@ -113,6 +134,45 @@ func parseBody(sourceBody *simplejson.Json) ([]interface{}, error) {
 	return body, nil
 }
 
+func isEmptyJson(j *simplejson.Json) bool {
+	// Create a pointer to the zero value of the simplejson.Json type
+	// and get the interface{} pointer to it.
+	zeroInterface := reflect.New(reflect.TypeOf(j).Elem()).Interface()
+
+	// Convert it to a properly typed pointer for the DeepEqual comparison.
+	zero := (zeroInterface).(*simplejson.Json)
+
+	return reflect.DeepEqual(zero, j)
+}
+
+func parseNodeIfPresent(n *simplejson.Json) (interface{}, error) {
+	if isEmptyJson(n) {
+		return nil, nil
+	}
+	return parseNode(n)
+}
+
+func ParseForStatement(f *simplejson.Json) (*ForStatement, error) {
+	init, err := parseNodeIfPresent(f.Get("init"))
+	if err != nil { return nil, err }
+
+	test, err := parseNodeIfPresent(f.Get("test"))
+	if err != nil { return nil, err }
+
+	update, err := parseNodeIfPresent(f.Get("update"))
+	if err != nil { return nil, err }
+
+	body, err := parseNodeIfPresent(f.Get("body"))
+	if err != nil { return nil, err }
+
+	return &ForStatement{
+		Position: newPosition(f),
+		Init:     init,
+		Test:     test,
+		Update:   update,
+		Body:     body,
+	}, nil
+}
 
 func ParseFunctionDeclaration(f *simplejson.Json) (*FunctionDeclaration, error) {
 	generator, err := f.Get("generator").Bool()
@@ -124,7 +184,7 @@ func ParseFunctionDeclaration(f *simplejson.Json) (*FunctionDeclaration, error) 
 	id, err := ParseIdentifier(f.Get("id"))
 	if err != nil { return nil, err }
 
-	body, err := ParseBlock(f.Get("body"))
+	body, err := ParseBlockStatement(f.Get("body"))
 	if err != nil { return nil, err }
 
 	return &FunctionDeclaration{
@@ -137,7 +197,7 @@ func ParseFunctionDeclaration(f *simplejson.Json) (*FunctionDeclaration, error) 
 	}, nil
 }
 
-func ParseBlock(b *simplejson.Json) (*BlockStatement, error) {
+func ParseBlockStatement(b *simplejson.Json) (*BlockStatement, error) {
 	typ := b.Get("type").MustString()
 	if typ != "BlockStatement" {
 		log.Fatal("Expected BlockStatement, got %s", typ)
@@ -148,8 +208,20 @@ func ParseBlock(b *simplejson.Json) (*BlockStatement, error) {
 
 	return &BlockStatement{
 		Position: newPosition(b),
-		body:     body,
+		Body:     body,
 	}, nil
+}
+
+func ParseExpressionStatement(e *simplejson.Json) (*ExpressionStatement, error) {
+	expr, err := parseNode(e.Get("expression"))
+	if err != nil { return nil, err }
+
+	return &ExpressionStatement{
+		Position:   newPosition(e),
+		Expression: expr,
+	}, nil
+
+
 }
 
 func ParseExportDefaultDeclaration(e *simplejson.Json) (*ExportDefaultDeclaration, error) {
@@ -344,6 +416,23 @@ func ParseVariableDeclarator(d *simplejson.Json) (*VariableDeclarator, error) {
 	}, nil
 }
 
+func ParseUpdateExpression(u *simplejson.Json) (*UpdateExpression, error) {
+	operator := u.Get("operator").MustString()
+
+	prefix, err := u.Get("prefix").Bool()
+	if err != nil { return nil, err }
+
+	argument, err := parseNode(u.Get("argument"))
+	if err != nil { return nil, err }
+
+	return &UpdateExpression{
+		Position: newPosition(u),
+		Operator: operator,
+		Prefix:   prefix,
+		Argument: argument,
+	}, nil
+}
+
 // Single-threaded program parsing -------------------------------------------
 
 func ParseProgram(p *simplejson.Json) (*Program, error) {
@@ -415,6 +504,9 @@ func parseNode(n *simplejson.Json) (interface{}, error) {
 	typ := n.Get("type").MustString()
 	switch typ {
 	case "BinaryExpression":         return ParseBinaryExpression(n)
+	case "BlockStatement":           return ParseBlockStatement(n)
+	case "ExpressionStatement":      return ParseExpressionStatement(n)
+	case "ForStatement":             return ParseForStatement(n)
 	case "FunctionDeclaration":      return ParseFunctionDeclaration(n)
 	case "ExportDefaultDeclaration": return ParseExportDefaultDeclaration(n)
 	case "ExportNamedDeclaration":   return ParseExportNamedDeclaration(n)
@@ -425,6 +517,7 @@ func parseNode(n *simplejson.Json) (interface{}, error) {
 	case "Identifier":               return ParseIdentifier(n)
 	case "ReturnStatement":          return ParseReturnStatement(n)
 	case "Literal":                  return ParseLiteral(n)
+	case "UpdateExpression":         return ParseUpdateExpression(n)
 	case "VariableDeclaration":      return ParseVariableDeclaration(n)
 	case "VariableDeclarator":       return ParseVariableDeclarator(n)
 	default:                         return nil, fmt.Errorf("Can't parse type: %s\n", typ)
